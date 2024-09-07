@@ -31,3 +31,83 @@ rust_aconfig_library {
     crate_name: "droidfood_attestation_flags",
     aconfig_declarations: "droidfood_attestation_flags",
 }
+
+rust_dependencies = [
+    "android.security.postprocessor-rust",
+    "libandroid_logger",
+    "libbinder_rs",
+    "libcxx",
+    "liblog_rust",
+    "libbase64_rust",
+    "libserde_json",
+    "libuuid",
+    "libdroidfood_attestation_flags_rust",
+]
+
+rust_library {
+    name: "libdroidfoodattestation",
+    crate_name: "droidfoodattestation",
+    srcs: ["src/lib.rs"],
+    rustlibs: rust_dependencies,
+    shared_libs: [
+        "libcurl",
+        "liblog",
+    ],
+    whole_static_libs: ["libdroidfood_attestation_curl"],
+    defaults: [
+        "keymint_use_latest_hal_aidl_rust",
+    ],
+}
+
+rust_binary {
+    name: "rkp_cert_processor",
+    crate_name: "droidfoodattestation",
+    srcs: ["src/main.rs"],
+    init_rc: ["droidfoodattestation.rc"],
+    rustlibs: rust_dependencies + ["libdroidfoodattestation"],
+    prefer_rlib: true, // To avoid dynamic link error.
+    bootstrap: true,
+}
+
+prebuilt_etc {
+    name: "com.android.droidfood.attestation.init.rc",
+    src: "droidfoodattestation.rc",
+    filename: "init.rc",
+    installable: true,
+}
+
+cc_library_static {
+    name: "libdroidfood_attestation_curl",
+    defaults: ["rust_static_cc_lib_defaults"],
+    srcs: [
+        "src/curl/http_client.cpp",
+    ],
+    local_include_dirs: [
+        "src/curl",
+    ],
+    shared_libs: [
+        "libcurl",
+        "liblog",
+    ],
+    generated_headers: [
+        "droidfood_attestation_cxx_bridge_header",
+        "cxx-bridge-header",
+    ],
+    generated_sources: ["droidfood_attestation_cxx_bridge_code"],
+}
+
+genrule {
+    name: "droidfood_attestation_cxx_bridge_header",
+    tools: ["cxxbridge"],
+    cmd: "$(location cxxbridge) $(in) --header > $(out)",
+    srcs: ["src/lib.rs"],
+    out: ["lib.rs.h"],
+}
+
+genrule {
+    name: "droidfood_attestation_cxx_bridge_code",
+    tools: ["cxxbridge"],
+    cmd: "$(location cxxbridge) $(in) >> $(out)",
+    srcs: ["src/lib.rs"],
+    out: ["lib_generated.cc"],
+}
