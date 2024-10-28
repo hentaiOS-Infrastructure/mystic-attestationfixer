@@ -67,13 +67,15 @@ rust_binary {
     rustlibs: rust_dependencies + ["libdroidfoodattestation"],
     prefer_rlib: true, // To avoid dynamic link error.
     bootstrap: true,
+    system_ext_specific: true,
 }
 
 prebuilt_etc {
-    name: "com.android.droidfood.attestation.init.rc",
+    name: "android.security.postprocessor.init.rc",
     src: "droidfoodattestation.rc",
     filename: "init.rc",
     installable: true,
+    system_ext_specific: true,
 }
 
 cc_library_static {
