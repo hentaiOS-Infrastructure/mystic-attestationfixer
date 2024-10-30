@@ -52,14 +52,6 @@ impl IKeystoreCertificatePostProcessor for KeystoreCertificatePostProcessor {
         let old_leaf_certificate = &old_keymint_certificates.leafCertificate;
         let old_attestation_chain = &old_keymint_certificates.remainingChain;
 
-        if !greenboot_bringup(&droidfood_attestation_flags::PROVIDER) {
-            info!("Attestation update for droidfood devices is not enabled yet.");
-            return Ok(CertificateChain {
-                leafCertificate: old_leaf_certificate.to_vec(),
-                remainingChain: old_attestation_chain.to_vec(),
-            });
-        }
-
         let request_id = Uuid::new_v4();
 
         // Generate the encoded request to be sent to Greenboot servers.
@@ -123,8 +115,4 @@ fn base64_decode(v: &Value) -> Result<Vec<u8>, Status> {
             Some("Could not base64 decode the returned string"),
         )),
     }
-}
-
-fn greenboot_bringup(provider: &droidfood_attestation_flags::FlagProvider) -> bool {
-    provider.droidfood_attestation_bringup()
 }
