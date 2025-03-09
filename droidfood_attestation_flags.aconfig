@@ -1,0 +1,10 @@
+package: "android.security.postprocessor"
+container: "system"
+
+flag {
+  name: "droidfood_attestation_bringup"
+  namespace: "hardware_backed_security"
+  description: "This flag controls the initial rollout of DroidfoodAttestationFixer package"
+  bug: "361877215"
+  is_fixed_read_only: true
+}

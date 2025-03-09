@@ -1,0 +1,10 @@
+# Start the droidfood attestation processor service.
+#
+# See system/core/init/README.md for information on the init.rc language.
+service droidfoodattestation /system_ext/bin/rkp_cert_processor
+    class droidfoodattestation
+    user system
+    group system inet
+    interface aidl rkp_cert_processor.service
+    oneshot
+    disabled
