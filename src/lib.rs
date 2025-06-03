@@ -95,11 +95,17 @@ impl IKeystoreCertificatePostProcessor for KeystoreCertificatePostProcessor {
         };
         info!("response received from server: {:#?}", response);
         if response["error"] != Value::Null {
-            info!("Error on communicating with the server: {:?}", response["error"]);
-            Err(Status::new_service_specific_error_str(
-                ERROR_SERVER_RESPONSE,
-                Some("Server responded with error."),
-            ))
+            let error_message = response["error"].as_str().unwrap();
+            if error_message.contains("not registered as a droidfood device") {
+                info!("Device is not registered. Falling back to original chain.");
+                Ok(old_keymint_certificates.clone())
+            } else {
+                info!("Error on communicating with the server: {:?}", error_message);
+                Err(Status::new_service_specific_error_str(
+                    ERROR_SERVER_RESPONSE,
+                    Some("Server responded with error."),
+                ))
+            }
         } else {
             let overwritten_chain = response["overwrittenCertificateChain"].as_array().unwrap();
             let leaf_certificate = base64_decode(&overwritten_chain[0]);
