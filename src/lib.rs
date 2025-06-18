@@ -15,7 +15,7 @@
 
 //! This crate implements droidfoodattestation
 
-use log::{error, info, warn};
+use log::{error, info};
 
 use android_security_postprocessor::aidl::android::security::postprocessor::{
     CertificateChain::CertificateChain,
@@ -24,8 +24,6 @@ use android_security_postprocessor::aidl::android::security::postprocessor::{
 
 use android_security_postprocessor::binder::{Interface, Status};
 use base64::prelude::*;
-use binder::wait_for_interface;
-use packagemanager_aidl::aidl::android::content::pm::IPackageManagerNative::IPackageManagerNative;
 use serde_json::Value;
 use std::ops::Deref;
 use uuid::Uuid;
@@ -40,13 +38,6 @@ mod ffi {
 
 const ERROR_JSON_DECODE: i32 = -2;
 const ERROR_SERVER_RESPONSE: i32 = -3;
-const DEFAULT_USER: i32 = 0;
-const WORK_PROFILE_USER: i32 = 10;
-
-const PACKAGE_MANAGER_NATIVE_SERVICE: &str = "package_native";
-// If corpHelper ever changes names, make sure to add both the names for some
-// time before removing the previous one.
-const PACKAGE_NAME_CORP_HELPER: &str = "com.google.android.apps.internal.assistant";
 
 /// The `IKeystoreCertificatePostProcessor` implementation.
 pub struct KeystoreCertificatePostProcessor;
@@ -58,11 +49,6 @@ impl IKeystoreCertificatePostProcessor for KeystoreCertificatePostProcessor {
         &self,
         old_keymint_certificates: &CertificateChain,
     ) -> Result<CertificateChain, Status> {
-        if !has_corp_helper() {
-            info!("Cannot be identified as a droidfood device. Falling back to original chain.");
-            return Ok(old_keymint_certificates.clone());
-        }
-
         let old_leaf_certificate = &old_keymint_certificates.leafCertificate;
         let old_attestation_chain = &old_keymint_certificates.remainingChain;
 
@@ -128,33 +114,5 @@ fn base64_decode(v: &Value) -> Result<Vec<u8>, Status> {
             ERROR_JSON_DECODE,
             Some("Could not base64 decode the returned string"),
         )),
-    }
-}
-
-fn has_corp_helper() -> bool {
-    match wait_for_interface::<dyn IPackageManagerNative>(PACKAGE_MANAGER_NATIVE_SERVICE) {
-        Ok(pm) => has_package(PACKAGE_NAME_CORP_HELPER, pm.as_ref()),
-        err => {
-            // Fail open since we can't tell if this device is registered or not.
-            warn!("Error while waiting for package manager: {err:#?}");
-            true
-        }
-    }
-}
-
-fn has_package(package_name: &str, pm: &dyn IPackageManagerNative) -> bool {
-    has_package_for_user(package_name, pm, DEFAULT_USER)
-        || has_package_for_user(package_name, pm, WORK_PROFILE_USER)
-}
-
-fn has_package_for_user(package_name: &str, pm: &dyn IPackageManagerNative, user: i32) -> bool {
-    match pm.getPackageUid(package_name, 0, user) {
-        Ok(uid) => {
-            if uid != -1 {
-                info!("Found a match for user {user}");
-            }
-            uid != -1
-        }
-        _ => false,
     }
 }

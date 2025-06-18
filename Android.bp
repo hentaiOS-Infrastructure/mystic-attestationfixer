@@ -42,7 +42,6 @@ rust_dependencies = [
     "libserde_json",
     "libuuid",
     "libdroidfood_attestation_flags_rust",
-    "packagemanager_aidl-rust",
 ]
 
 rust_library {
