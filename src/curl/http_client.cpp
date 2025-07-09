@@ -36,6 +36,10 @@ get_new_certificate_chain(rust::Str old_certificate_chain) {
   curl_easy_setopt(handle, CURLOPT_WRITEDATA, response.get());
   curl_easy_setopt(handle, CURLOPT_VERBOSE, 1L);
 
+  // Set the timeout to 5 seconds. This is to avoid the curl library
+  // hanging indefinitely.
+  curl_easy_setopt(handle, CURLOPT_TIMEOUT, 5);
+
   const CURLcode rc = curl_easy_perform(handle);
 
   curl_slist_free_all(headers);
