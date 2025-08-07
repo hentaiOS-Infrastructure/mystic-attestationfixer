@@ -38,10 +38,10 @@ fn main() {
 
     // Redirect panic messages to logcat
     panic::set_hook(Box::new(|panic_info| {
-        error!("{}", panic_info);
+        error!("{panic_info}");
     }));
 
-    info!("{} starting up", SERVICE_NAME);
+    info!("{SERVICE_NAME} starting up");
 
     let post_processor = KeystoreCertificatePostProcessor;
     let post_processor_binder =

@@ -72,14 +72,14 @@ impl IKeystoreCertificatePostProcessor for KeystoreCertificatePostProcessor {
         let response: Value = match serde_json::from_str(&String::from_utf8_lossy(ffi_response)) {
             Ok(res) => res,
             Err(e) => {
-                error!("Error when trying to decode message: {:?}, error: {:#?}", ffi_response, e);
+                error!("Error when trying to decode message: {ffi_response:?}, error: {e:#?}");
                 return Err(Status::new_service_specific_error_str(
                     ERROR_JSON_DECODE,
                     Some("Failure when connecting to server."),
                 ));
             }
         };
-        info!("response received from server: {:#?}", response);
+        info!("response received from server: {response:#?}");
         if response["error"] != Value::Null {
             info!("Error on communicating with the server: {:?}", response["error"]);
             Err(Status::new_service_specific_error_str(
