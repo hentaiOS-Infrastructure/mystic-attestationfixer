@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package mystic.attestation.public.v1;
+
+option go_package = "attestation-project/internal/wire;wire";
+
+service AttestationOverwriter {
+  rpc OverwriteAttestation(OverwriteAttestationRequest) returns (OverwriteAttestationResponse);
+}
+
+message OverwriteAttestationRequest {
+  bytes leaf_certificate = 1;
+  bytes remaining_chain = 2;
+  string request_id = 3;
+
+  repeated bytes device_attestation_chain = 4;
+  repeated bytes response_encryption_key_chain = 5;
+}
+
+message OverwriteAttestationResponse {
+  bytes encrypted_response = 1;
+  bytes response_nonce = 2;
+  bytes response_ephemeral_public_key = 3;
+}
+
+message OverwriteAttestationResponsePlaintext {
+  bytes leaf_certificate = 1;
+  bytes remaining_chain = 2;
+}

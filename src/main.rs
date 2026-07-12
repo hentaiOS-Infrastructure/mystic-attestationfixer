@@ -15,10 +15,11 @@
 
 //! This crate implements droidfoodattestation_server
 
+use android_logger::FilterBuilder;
 use log::{error, info};
 use std::panic;
 
-use droidfoodattestation::KeystoreCertificatePostProcessor;
+use droidfoodattestation::{intensive_logs_enabled, KeystoreCertificatePostProcessor};
 
 use android_security_postprocessor::aidl::android::security::postprocessor::{
     IKeystoreCertificatePostProcessor::BnKeystoreCertificatePostProcessor
@@ -29,11 +30,21 @@ use android_security_postprocessor::binder::BinderFeatures;
 static SERVICE_NAME: &str = "rkp_cert_processor.service";
 
 fn main() {
+    let mut log_filter = FilterBuilder::new();
+    log_filter.filter(None, log::LevelFilter::Info);
+    if intensive_logs_enabled() {
+        log_filter.filter(Some("droidfoodattestation"), log::LevelFilter::Debug);
+    }
+
+    let log_level =
+        if intensive_logs_enabled() { log::LevelFilter::Debug } else { log::LevelFilter::Info };
+
     // Initialize android logging
     android_logger::init_once(
         android_logger::Config::default()
             .with_tag("droidfood_attestation")
-            .with_max_level(log::LevelFilter::Trace),
+            .with_filter(log_filter.build())
+            .with_max_level(log_level),
     );
 
     // Redirect panic messages to logcat

@@ -18,30 +18,24 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
-// Flag definitions
-aconfig_declarations {
-    name: "droidfood_attestation_flags",
-    package: "android.security.postprocessor",
-    container: "system_ext",
-    srcs: ["droidfood_attestation_flags.aconfig"],
-}
-
-rust_aconfig_library {
-    name: "libdroidfood_attestation_flags_rust",
-    crate_name: "droidfood_attestation_flags",
-    aconfig_declarations: "droidfood_attestation_flags",
+rust_protobuf {
+    name: "libdroidfood_attestation_proto_rust",
+    crate_name: "droidfood_attestation_proto",
+    source_stem: "droidfood_attestation_proto",
+    protos: ["proto/overwrite.proto"],
 }
 
 rust_dependencies = [
     "android.security.postprocessor-rust",
     "libandroid_logger",
     "libbinder_rs",
-    "libcxx",
     "liblog_rust",
-    "libbase64_rust",
-    "libserde_json",
+    "libopenssl",
+    "libprotobuf",
+    "libreqwest",
+    "librustutils",
     "libuuid",
-    "libdroidfood_attestation_flags_rust",
+    "libdroidfood_attestation_proto_rust",
 ]
 
 rust_library {
@@ -49,13 +43,9 @@ rust_library {
     crate_name: "droidfoodattestation",
     srcs: ["src/lib.rs"],
     rustlibs: rust_dependencies,
-    shared_libs: [
-        "libcurl",
-        "liblog",
-    ],
-    whole_static_libs: ["libdroidfood_attestation_curl"],
     defaults: [
         "keymint_use_latest_hal_aidl_rust",
+        "keystore2_use_latest_aidl_rust",
     ],
 }
 
@@ -76,40 +66,4 @@ prebuilt_etc {
     filename: "init.rc",
     installable: true,
     system_ext_specific: true,
-}
-
-cc_library_static {
-    name: "libdroidfood_attestation_curl",
-    defaults: ["rust_static_cc_lib_defaults"],
-    srcs: [
-        "src/curl/http_client.cpp",
-    ],
-    local_include_dirs: [
-        "src/curl",
-    ],
-    shared_libs: [
-        "libcurl",
-        "liblog",
-    ],
-    generated_headers: [
-        "droidfood_attestation_cxx_bridge_header",
-        "cxx-bridge-header",
-    ],
-    generated_sources: ["droidfood_attestation_cxx_bridge_code"],
-}
-
-genrule {
-    name: "droidfood_attestation_cxx_bridge_header",
-    tools: ["cxxbridge"],
-    cmd: "$(location cxxbridge) $(in) --header > $(out)",
-    srcs: ["src/lib.rs"],
-    out: ["lib.rs.h"],
-}
-
-genrule {
-    name: "droidfood_attestation_cxx_bridge_code",
-    tools: ["cxxbridge"],
-    cmd: "$(location cxxbridge) $(in) >> $(out)",
-    srcs: ["src/lib.rs"],
-    out: ["lib_generated.cc"],
 }
