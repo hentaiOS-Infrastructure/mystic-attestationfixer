@@ -46,7 +46,8 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
-const BACKEND_GRPC_URL: &str = "https://greendroidfood-pa.meowproxy.net/mystic.attestation.public.v1.AttestationOverwriter/OverwriteAttestation";
+const BACKEND_GRPC_DIRECT_URL: &str = "https://greendroidfood-pa.helluvaos.com/mystic.attestation.public.v1.AttestationOverwriter/OverwriteAttestation";
+const BACKEND_GRPC_PROXY_URL: &str = "https://greendroidfood-pa.meowproxy.net/mystic.attestation.public.v1.AttestationOverwriter/OverwriteAttestation";
 const ERROR_SERVER_REQUEST: i32 = -2;
 const ERROR_SERVER_RESPONSE: i32 = -3;
 const KEYSTORE2_SERVICE: &str = "android.system.keystore2.IKeystoreService/default";
@@ -66,12 +67,23 @@ const GRPC_MAX_MESSAGE_BYTES: usize = 1024 * 1024;
 
 static BACKEND_CLIENT: OnceLock<Result<Client, String>> = OnceLock::new();
 
+/// Routes overwrite requests through the proxy instead of the direct backend.
+pub const USE_BACKEND_PROXY: bool = true;
+
 /// Enables verbose Droidfood-only diagnostics when this crate is built with debug assertions.
 pub const ENABLE_INTENSIVE_LOGS_IN_DEBUG_BUILDS: bool = false;
 
 /// Returns true when verbose Droidfood diagnostics should be emitted.
 pub fn intensive_logs_enabled() -> bool {
     cfg!(debug_assertions) && ENABLE_INTENSIVE_LOGS_IN_DEBUG_BUILDS
+}
+
+fn backend_grpc_url() -> &'static str {
+    if USE_BACKEND_PROXY {
+        BACKEND_GRPC_PROXY_URL
+    } else {
+        BACKEND_GRPC_DIRECT_URL
+    }
 }
 
 macro_rules! intensive_log {
@@ -290,7 +302,7 @@ fn request_overwrite_once(
     timeout: Duration,
 ) -> Result<OverwriteAttestationResponse, OverwriteAttemptError> {
     let mut response = client
-        .post(BACKEND_GRPC_URL)
+        .post(backend_grpc_url())
         .header("content-type", "application/grpc")
         .header("te", "trailers")
         .header("user-agent", "DroidfoodAttestationFixer/0.1")
@@ -418,6 +430,41 @@ fn generate_response_key(request_id: &str) -> Result<ResponseKey, Status> {
         alias: Some(format!("{RESPONSE_KEY_ALIAS_PREFIX}{request_id}")),
         blob: None,
     };
+    let params = response_key_params(request_id, false);
+    let metadata =
+        match security_level.generateKey(&descriptor, None, &params, 0, b"MysticAttestation") {
+            Ok(metadata) => metadata,
+            Err(full_err) => {
+                intensive_log!("full device identity rejected; retrying with serial: {full_err:?}");
+                let serial_params = response_key_params(request_id, true);
+                security_level
+                    .generateKey(&descriptor, None, &serial_params, 0, b"MysticAttestation")
+                    .map_err(|serial_err| {
+                        service_error(
+                            ERROR_SERVER_REQUEST,
+                            &format!(
+                                "response key generation failed: full={full_err:?}, \
+                                 serial={serial_err:?}"
+                            ),
+                        )
+                    })?
+            }
+        };
+
+    let mut certificate_chain = Vec::new();
+    let cert = metadata.certificate.ok_or_else(|| {
+        service_error(ERROR_SERVER_REQUEST, "response key generation returned no certificate")
+    })?;
+    certificate_chain.push(cert);
+    if let Some(chain) = metadata.certificateChain {
+        if !chain.is_empty() {
+            certificate_chain.push(chain);
+        }
+    }
+    Ok(ResponseKey { descriptor: metadata.key, certificate_chain })
+}
+
+fn response_key_params(request_id: &str, serial_only: bool) -> Vec<KeyParameter> {
     let mut params = vec![
         key_param(Tag::ALGORITHM, KeyParameterValue::Algorithm(Algorithm::EC)),
         key_param(Tag::EC_CURVE, KeyParameterValue::EcCurve(EcCurve::P_256)),
@@ -434,24 +481,8 @@ fn generate_response_key(request_id: &str) -> Result<ResponseKey, Status> {
         ),
         key_param(Tag::CERTIFICATE_SERIAL, KeyParameterValue::Blob(vec![1])),
     ];
-    params.extend(device_attestation_params());
-    let metadata = security_level
-        .generateKey(&descriptor, None, &params, 0, b"MysticAttestation")
-        .map_err(|err| {
-            service_error(ERROR_SERVER_REQUEST, &format!("response key generation failed: {err:?}"))
-        })?;
-
-    let mut certificate_chain = Vec::new();
-    let cert = metadata.certificate.ok_or_else(|| {
-        service_error(ERROR_SERVER_REQUEST, "response key generation returned no certificate")
-    })?;
-    certificate_chain.push(cert);
-    if let Some(chain) = metadata.certificateChain {
-        if !chain.is_empty() {
-            certificate_chain.push(chain);
-        }
-    }
-    Ok(ResponseKey { descriptor: metadata.key, certificate_chain })
+    params.extend(device_attestation_params(serial_only));
+    params
 }
 
 fn decrypt_response(
@@ -552,45 +583,29 @@ fn key_param(tag: Tag, value: KeyParameterValue) -> KeyParameter {
     KeyParameter { tag, value }
 }
 
-fn device_attestation_params() -> Vec<KeyParameter> {
-    let mut params = Vec::new();
-    push_attestation_id(
-        &mut params,
-        Tag::ATTESTATION_ID_BRAND,
-        get_attest_id_value(Tag::ATTESTATION_ID_BRAND, "brand"),
-    );
-    push_attestation_id(
-        &mut params,
-        Tag::ATTESTATION_ID_DEVICE,
-        get_attest_id_value(Tag::ATTESTATION_ID_DEVICE, "device"),
-    );
-    push_attestation_id(
-        &mut params,
-        Tag::ATTESTATION_ID_PRODUCT,
-        get_attest_id_value(Tag::ATTESTATION_ID_PRODUCT, "name"),
-    );
-    push_attestation_id(
-        &mut params,
-        Tag::ATTESTATION_ID_SERIAL,
-        get_attest_id_value(Tag::ATTESTATION_ID_SERIAL, "serialno"),
-    );
-    push_attestation_id(
-        &mut params,
-        Tag::ATTESTATION_ID_MANUFACTURER,
-        get_attest_id_value(Tag::ATTESTATION_ID_MANUFACTURER, "manufacturer"),
-    );
-    push_attestation_id(
-        &mut params,
-        Tag::ATTESTATION_ID_MODEL,
-        get_attest_id_value(Tag::ATTESTATION_ID_MODEL, "model"),
-    );
-    params
-}
-
-fn push_attestation_id(params: &mut Vec<KeyParameter>, tag: Tag, value: Vec<u8>) {
-    if !value.is_empty() {
-        params.push(key_param(tag, KeyParameterValue::Blob(value)));
-    }
+fn device_attestation_params(serial_only: bool) -> Vec<KeyParameter> {
+    let ids = if serial_only {
+        &[(Tag::ATTESTATION_ID_SERIAL, "serialno")][..]
+    } else {
+        &[
+            (Tag::ATTESTATION_ID_BRAND, "brand"),
+            (Tag::ATTESTATION_ID_DEVICE, "device"),
+            (Tag::ATTESTATION_ID_PRODUCT, "name"),
+            (Tag::ATTESTATION_ID_SERIAL, "serialno"),
+            (Tag::ATTESTATION_ID_MANUFACTURER, "manufacturer"),
+            (Tag::ATTESTATION_ID_MODEL, "model"),
+        ][..]
+    };
+    ids.iter()
+        .filter_map(|&(tag, property)| {
+            let value = get_attest_id_value(tag, property);
+            if value.is_empty() {
+                None
+            } else {
+                Some(key_param(tag, KeyParameterValue::Blob(value)))
+            }
+        })
+        .collect()
 }
 
 fn get_attest_id_value(attest_id: Tag, prop_name: &str) -> Vec<u8> {
