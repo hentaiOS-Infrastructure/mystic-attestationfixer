@@ -121,6 +121,7 @@ impl IKeystoreCertificatePostProcessor for KeystoreCertificatePostProcessor {
             &old_keymint_certificates.leafCertificate,
             &old_keymint_certificates.remainingChain,
             &response_key.certificate_chain,
+            &response_key.untrusted_device_serial,
         );
         let response = match response {
             Ok(response) => response,
@@ -186,6 +187,7 @@ impl IKeystoreCertificatePostProcessor for KeystoreCertificatePostProcessor {
 struct ResponseKey {
     descriptor: KeyDescriptor,
     certificate_chain: Vec<Vec<u8>>,
+    untrusted_device_serial: String,
 }
 
 enum OverwriteRequestError {
@@ -205,13 +207,17 @@ fn request_overwrite(
     leaf_certificate: &[u8],
     remaining_chain: &[u8],
     response_key_chain: &[Vec<u8>],
+    untrusted_device_serial: &str,
 ) -> Result<OverwriteAttestationResponse, OverwriteRequestError> {
     let mut request = OverwriteAttestationRequest::new();
     request.leaf_certificate = leaf_certificate.to_vec();
     request.remaining_chain = remaining_chain.to_vec();
     request.request_id = request_id.to_owned();
-    request.device_attestation_chain = response_key_chain.to_vec();
+    if untrusted_device_serial.is_empty() {
+        request.device_attestation_chain = response_key_chain.to_vec();
+    }
     request.response_encryption_key_chain = response_key_chain.to_vec();
+    request.untrusted_device_serial = untrusted_device_serial.to_owned();
 
     let request_bytes = request.write_to_bytes().map_err(|err| {
         OverwriteRequestError::Backend(format!(
@@ -231,39 +237,35 @@ fn request_overwrite(
                 "attestation overwrite request deadline exceeded".to_owned(),
             ));
         }
-        let retry_error = match request_overwrite_once(
-            client,
-            request_id,
-            &request_frame,
-            remaining,
-        ) {
-            Ok(response) => return Ok(response),
-            Err(OverwriteAttemptError::InvalidArgument(message)) => {
-                return Err(OverwriteRequestError::InvalidArgument(message));
-            }
-            Err(OverwriteAttemptError::Fatal(message)) => {
-                return Err(OverwriteRequestError::Backend(message));
-            }
-            Err(OverwriteAttemptError::EmptyResponse) => {
-                intensive_log!(
-                    "attestation overwrite empty response retry: request_id={} attempt={}/{}",
-                    request_id,
-                    attempt,
-                    BACKEND_REQUEST_ATTEMPTS
-                );
-                OverwriteRequestError::InvalidArgument("INVALID_ARGUMENT".to_owned())
-            }
-            Err(OverwriteAttemptError::Retryable(message)) => {
-                intensive_log!(
+        let retry_error =
+            match request_overwrite_once(client, request_id, &request_frame, remaining) {
+                Ok(response) => return Ok(response),
+                Err(OverwriteAttemptError::InvalidArgument(message)) => {
+                    return Err(OverwriteRequestError::InvalidArgument(message));
+                }
+                Err(OverwriteAttemptError::Fatal(message)) => {
+                    return Err(OverwriteRequestError::Backend(message));
+                }
+                Err(OverwriteAttemptError::EmptyResponse) => {
+                    intensive_log!(
+                        "attestation overwrite empty response retry: request_id={} attempt={}/{}",
+                        request_id,
+                        attempt,
+                        BACKEND_REQUEST_ATTEMPTS
+                    );
+                    OverwriteRequestError::InvalidArgument("INVALID_ARGUMENT".to_owned())
+                }
+                Err(OverwriteAttemptError::Retryable(message)) => {
+                    intensive_log!(
                     "attestation overwrite transport retry: request_id={} attempt={}/{} error={}",
                     request_id,
                     attempt,
                     BACKEND_REQUEST_ATTEMPTS,
                     message
                 );
-                OverwriteRequestError::Backend(message)
-            }
-        };
+                    OverwriteRequestError::Backend(message)
+                }
+            };
         if attempt == BACKEND_REQUEST_ATTEMPTS {
             return Err(retry_error);
         }
@@ -430,24 +432,60 @@ fn generate_response_key(request_id: &str) -> Result<ResponseKey, Status> {
         alias: Some(format!("{RESPONSE_KEY_ALIAS_PREFIX}{request_id}")),
         blob: None,
     };
-    let params = response_key_params(request_id, false);
-    let metadata =
+    let params = response_key_params(request_id, ResponseIdentity::Full);
+    let (metadata, untrusted_device_serial) =
         match security_level.generateKey(&descriptor, None, &params, 0, b"MysticAttestation") {
-            Ok(metadata) => metadata,
+            Ok(metadata) => (metadata, String::new()),
             Err(full_err) => {
                 intensive_log!("full device identity rejected; retrying with serial: {full_err:?}");
-                let serial_params = response_key_params(request_id, true);
-                security_level
-                    .generateKey(&descriptor, None, &serial_params, 0, b"MysticAttestation")
-                    .map_err(|serial_err| {
-                        service_error(
-                            ERROR_SERVER_REQUEST,
-                            &format!(
-                                "response key generation failed: full={full_err:?}, \
-                                 serial={serial_err:?}"
-                            ),
-                        )
-                    })?
+                let serial_params = response_key_params(request_id, ResponseIdentity::Serial);
+                match security_level.generateKey(
+                    &descriptor,
+                    None,
+                    &serial_params,
+                    0,
+                    b"MysticAttestation",
+                ) {
+                    Ok(metadata) => (metadata, String::new()),
+                    Err(serial_err) => {
+                        let serial = String::from_utf8_lossy(&get_system_prop("ro.serialno"))
+                            .trim()
+                            .to_owned();
+                        if serial.is_empty() {
+                            return Err(service_error(
+                                ERROR_SERVER_REQUEST,
+                                &format!(
+                                    "response key generation failed and ro.serialno is empty: \
+                                     full={full_err:?}, serial={serial_err:?}"
+                                ),
+                            ));
+                        }
+                        error!(
+                            "device identity attestation failed; using UNTRUSTED ro.serialno \
+                             pending manual approval: full={full_err:?}, serial={serial_err:?}"
+                        );
+                        let no_identity_params =
+                            response_key_params(request_id, ResponseIdentity::None);
+                        let metadata = security_level
+                            .generateKey(
+                                &descriptor,
+                                None,
+                                &no_identity_params,
+                                0,
+                                b"MysticAttestation",
+                            )
+                            .map_err(|no_identity_err| {
+                                service_error(
+                                    ERROR_SERVER_REQUEST,
+                                    &format!(
+                                        "response key generation failed: full={full_err:?}, \
+                                         serial={serial_err:?}, no_identity={no_identity_err:?}"
+                                    ),
+                                )
+                            })?;
+                        (metadata, serial)
+                    }
+                }
             }
         };
 
@@ -461,10 +499,17 @@ fn generate_response_key(request_id: &str) -> Result<ResponseKey, Status> {
             certificate_chain.push(chain);
         }
     }
-    Ok(ResponseKey { descriptor: metadata.key, certificate_chain })
+    Ok(ResponseKey { descriptor: metadata.key, certificate_chain, untrusted_device_serial })
 }
 
-fn response_key_params(request_id: &str, serial_only: bool) -> Vec<KeyParameter> {
+#[derive(Clone, Copy)]
+enum ResponseIdentity {
+    Full,
+    Serial,
+    None,
+}
+
+fn response_key_params(request_id: &str, identity: ResponseIdentity) -> Vec<KeyParameter> {
     let mut params = vec![
         key_param(Tag::ALGORITHM, KeyParameterValue::Algorithm(Algorithm::EC)),
         key_param(Tag::EC_CURVE, KeyParameterValue::EcCurve(EcCurve::P_256)),
@@ -481,7 +526,7 @@ fn response_key_params(request_id: &str, serial_only: bool) -> Vec<KeyParameter>
         ),
         key_param(Tag::CERTIFICATE_SERIAL, KeyParameterValue::Blob(vec![1])),
     ];
-    params.extend(device_attestation_params(serial_only));
+    params.extend(device_attestation_params(identity));
     params
 }
 
@@ -583,18 +628,18 @@ fn key_param(tag: Tag, value: KeyParameterValue) -> KeyParameter {
     KeyParameter { tag, value }
 }
 
-fn device_attestation_params(serial_only: bool) -> Vec<KeyParameter> {
-    let ids = if serial_only {
-        &[(Tag::ATTESTATION_ID_SERIAL, "serialno")][..]
-    } else {
-        &[
+fn device_attestation_params(identity: ResponseIdentity) -> Vec<KeyParameter> {
+    let ids = match identity {
+        ResponseIdentity::Full => &[
             (Tag::ATTESTATION_ID_BRAND, "brand"),
             (Tag::ATTESTATION_ID_DEVICE, "device"),
             (Tag::ATTESTATION_ID_PRODUCT, "name"),
             (Tag::ATTESTATION_ID_SERIAL, "serialno"),
             (Tag::ATTESTATION_ID_MANUFACTURER, "manufacturer"),
             (Tag::ATTESTATION_ID_MODEL, "model"),
-        ][..]
+        ][..],
+        ResponseIdentity::Serial => &[(Tag::ATTESTATION_ID_SERIAL, "serialno")][..],
+        ResponseIdentity::None => &[],
     };
     ids.iter()
         .filter_map(|&(tag, property)| {

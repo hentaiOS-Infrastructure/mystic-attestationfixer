@@ -15,6 +15,7 @@ message OverwriteAttestationRequest {
 
   repeated bytes device_attestation_chain = 4;
   repeated bytes response_encryption_key_chain = 5;
+  string untrusted_device_serial = 6;
 }
 
 message OverwriteAttestationResponse {
