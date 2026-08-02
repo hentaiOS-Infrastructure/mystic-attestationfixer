@@ -18,6 +18,31 @@ package {
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
+aidl_interface {
+    name: "mystic.attestation.provisioner",
+    local_include_dir: "aidl",
+    srcs: [
+        "aidl/mystic/attestation/provisioner/AttestationKeyCertificateProfile.aidl",
+        "aidl/mystic/attestation/provisioner/IBackendAttestationKeyProvisioner.aidl",
+        "aidl/mystic/attestation/provisioner/ProvisionedAttestationKey.aidl",
+    ],
+    unstable: true,
+    backend: {
+        cpp: {
+            enabled: false,
+        },
+        java: {
+            enabled: false,
+        },
+        ndk: {
+            enabled: false,
+        },
+        rust: {
+            enabled: true,
+        },
+    },
+}
+
 rust_protobuf {
     name: "libdroidfood_attestation_proto_rust",
     crate_name: "droidfood_attestation_proto",
@@ -29,6 +54,7 @@ rust_dependencies = [
     "android.security.postprocessor-rust",
     "libandroid_logger",
     "libbinder_rs",
+    "libkeystore2_aaid-rust",
     "liblog_rust",
     "libopenssl",
     "libprotobuf",
@@ -36,6 +62,7 @@ rust_dependencies = [
     "librustutils",
     "libuuid",
     "libdroidfood_attestation_proto_rust",
+    "mystic.attestation.provisioner-rust",
 ]
 
 rust_library {

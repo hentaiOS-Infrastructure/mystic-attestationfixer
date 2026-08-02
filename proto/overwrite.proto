@@ -6,6 +6,8 @@ option go_package = "attestation-project/internal/wire;wire";
 
 service AttestationOverwriter {
   rpc OverwriteAttestation(OverwriteAttestationRequest) returns (OverwriteAttestationResponse);
+  rpc ProvisionAttestationKey(ProvisionAttestationKeyRequest)
+      returns (ProvisionAttestationKeyResponse);
 }
 
 message OverwriteAttestationRequest {
@@ -16,6 +18,8 @@ message OverwriteAttestationRequest {
   repeated bytes device_attestation_chain = 4;
   repeated bytes response_encryption_key_chain = 5;
   string untrusted_device_serial = 6;
+  uint32 protocol_version = 7;
+  bytes device_identity_signature = 8;
 }
 
 message OverwriteAttestationResponse {
@@ -27,4 +31,40 @@ message OverwriteAttestationResponse {
 message OverwriteAttestationResponsePlaintext {
   bytes leaf_certificate = 1;
   bytes remaining_chain = 2;
+  bool reprovision_attestation_key = 3;
+}
+
+message ProvisionAttestationKeyRequest {
+  string request_id = 1;
+  repeated bytes device_attestation_chain = 2;
+  repeated bytes response_encryption_key_chain = 3;
+  string untrusted_device_serial = 4;
+  reserved 5;
+  reserved "protocol_version";
+  AttestationKeyCertificateProfile certificate_profile = 6;
+  repeated bytes wrapping_key_chain = 7;
+  bytes device_identity_signature = 8;
+}
+
+message AttestationKeyCertificateProfile {
+  bytes subject_der = 1;
+  bytes serial_number = 2;
+  int64 not_before_ms = 3;
+  int64 not_after_ms = 4;
+  bytes attestation_challenge = 5;
+  bytes attestation_application_id = 6;
+}
+
+message ProvisionAttestationKeyResponse {
+  bytes encrypted_response = 1;
+  bytes response_nonce = 2;
+  bytes response_ephemeral_public_key = 3;
+}
+
+message ProvisionAttestationKeyResponsePlaintext {
+  reserved 1, 2;
+  reserved "key_id", "pkcs8_private_key";
+  bytes leaf_certificate = 3;
+  bytes remaining_chain = 4;
+  bytes secure_key_wrapper = 5;
 }
