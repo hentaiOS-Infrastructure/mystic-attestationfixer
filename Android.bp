@@ -54,7 +54,6 @@ rust_dependencies = [
     "android.security.postprocessor-rust",
     "libandroid_logger",
     "libbinder_rs",
-    "libkeystore2_aaid-rust",
     "liblog_rust",
     "libopenssl",
     "libprotobuf",

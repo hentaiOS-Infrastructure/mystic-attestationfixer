@@ -36,7 +36,6 @@ use droidfood_attestation_proto::overwrite::{
     OverwriteAttestationResponsePlaintext, ProvisionAttestationKeyRequest,
     ProvisionAttestationKeyResponse, ProvisionAttestationKeyResponsePlaintext,
 };
-use keystore2_aaid::get_aaid;
 use log::{debug, error};
 use mystic_attestation_provisioner::aidl::mystic::attestation::provisioner::{
     AttestationKeyCertificateProfile::AttestationKeyCertificateProfile as BinderAttestationKeyCertificateProfile,
@@ -63,7 +62,6 @@ const BACKEND_GRPC_SERVICE: &str = "mystic.attestation.public.v1.AttestationOver
 const ERROR_SERVER_REQUEST: i32 = -2;
 const ERROR_SERVER_RESPONSE: i32 = -3;
 const ERROR_REPROVISION_ATTESTATION_KEY: i32 = -4;
-const AAID_NOT_FOUND_STATUS: u32 = 27;
 const KEYSTORE2_SERVICE: &str = "android.system.keystore2.IKeystoreService/default";
 const RESPONSE_KEY_ALIAS_PREFIX: &str = "mystic_response_";
 const RESPONSE_KEY_CHALLENGE_PREFIX: &str = "MysticAttestation response key v1:";
@@ -428,36 +426,8 @@ fn wire_attestation_key_profile(
     wire.not_before_ms = profile.notBeforeMs;
     wire.not_after_ms = profile.notAfterMs;
     wire.attestation_challenge = profile.attestationChallenge.clone();
-    wire.attestation_application_id = resolve_attestation_application_id(profile)?;
+    wire.attestation_application_id = profile.attestationApplicationId.clone();
     Ok(wire)
-}
-
-fn resolve_attestation_application_id(
-    profile: &BinderAttestationKeyCertificateProfile,
-) -> Result<Vec<u8>, OverwriteRequestError> {
-    if !profile.attestationApplicationId.is_empty() {
-        return Ok(profile.attestationApplicationId.clone());
-    }
-
-    let caller_uid = u32::try_from(profile.callerUid).map_err(|_| {
-        OverwriteRequestError::Backend(
-            "attestation-key request is missing its Android caller UID".to_owned(),
-        )
-    })?;
-    match get_aaid(caller_uid) {
-        Ok(application_id) => Ok(application_id),
-        Err(status) if status == AAID_NOT_FOUND_STATUS => {
-            intensive_log!(
-                "UID {} has no Android attestation application ID (status {})",
-                caller_uid,
-                status
-            );
-            Ok(Vec::new())
-        }
-        Err(status) => Err(OverwriteRequestError::Backend(format!(
-            "attestation application ID lookup failed with status {status}"
-        ))),
-    }
 }
 
 fn request_provision(
